@@ -1,0 +1,6 @@
+/.chat
+/.claude
+CHAT.md
+.zig-cache/
+zig-out/
+*.o
