@@ -6,9 +6,10 @@ const GradContext = ml.tensor.GradContext;
 const AutodiffContext = ml.tensor.AutodiffContext;
 const CubeState = ml.env.CubeState;
 const Move = ml.env.Move;
-const DQNAgent = ml.rl.DQNAgent;
 const DQNConfig = ml.rl.DQNConfig;
-const Experience = ml.rl.Experience;
+
+const DQNAgent = ml.rl.DQNAgent(CubeState);
+const Experience = ml.rl.Experience(CubeState);
 
 pub fn main() !void {
     std.debug.print("=== DQN Rubik's Cube Solver - Smoke Test ===\n\n", .{});
@@ -24,7 +25,7 @@ pub fn main() !void {
     var grad_ctx = GradContext.init(allocator);
     defer grad_ctx.deinit();
 
-    var ad_ctx = AutodiffContext.init(allocator);
+    var ad_ctx = AutodiffContext.init(allocator, &grad_ctx);
     defer ad_ctx.deinit();
 
     // Initialize RNG
@@ -87,9 +88,13 @@ pub fn main() !void {
         var loss_count: usize = 0;
 
         // Episode loop
+        var state_onehot: [324]f32 = undefined;
         for (0..config.max_episode_steps) |step| {
+            // Convert state to one-hot
+            state.toOneHot(&state_onehot);
+
             // Select action
-            const action = try agent.selectAction(state, &tensor_ctx, &ad_ctx, rng);
+            const action = try agent.selectAction(&state_onehot, &tensor_ctx, &ad_ctx, rng);
 
             // Execute action
             var next_state = state;
@@ -112,8 +117,8 @@ pub fn main() !void {
 
             // Train if enough samples
             if (agent.replay_buffer.canSample(config.batch_size)) {
-                const loss = try agent.trainStep(&tensor_ctx, &grad_ctx, &ad_ctx, rng);
-                episode_loss += loss;
+                const diag = try agent.trainStep(&tensor_ctx, &grad_ctx, &ad_ctx, rng);
+                episode_loss += diag.loss;
                 loss_count += 1;
             }
 

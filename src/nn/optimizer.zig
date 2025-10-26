@@ -5,21 +5,36 @@ const GradContext = tensor_mod.GradContext;
 const GradHandle = tensor_mod.GradHandle;
 const Tensor = tensor_mod.Tensor;
 
-/// SGD optimizer step: param -= lr * grad
+/// SGD optimizer step with optional gradient clipping: param -= lr * grad
 pub fn sgdStep(
     params: []Tensor,
     param_handles: []const GradHandle,
     grad_ctx: *GradContext,
     learning_rate: f32,
 ) void {
+    sgdStepClipped(params, param_handles, grad_ctx, learning_rate, null);
+}
+
+/// SGD optimizer step with gradient clipping
+pub fn sgdStepClipped(
+    params: []Tensor,
+    param_handles: []const GradHandle,
+    grad_ctx: *GradContext,
+    learning_rate: f32,
+    max_grad_norm: ?f32,
+) void {
     std.debug.assert(params.len == param_handles.len);
 
     for (params, param_handles) |param, handle| {
         const grad = grad_ctx.getGrad(handle);
 
-        // Update: param -= lr * grad
+        // Update with optional gradient clipping: param -= lr * clip(grad)
         for (param.data, grad) |*p, g| {
-            p.* -= learning_rate * g;
+            const clipped_g = if (max_grad_norm) |max_norm|
+                @max(-max_norm, @min(max_norm, g))
+            else
+                g;
+            p.* -= learning_rate * clipped_g;
         }
     }
 }

@@ -18,6 +18,7 @@ pub const OpType = enum {
     matmul,
     relu,
     broadcast_add,
+    gather_actions,
 };
 
 /// Backward function signature
@@ -37,6 +38,7 @@ pub const Op = struct {
         matmul: MatmulCache,
         relu: ReluCache,
         broadcast_add: BroadcastAddCache,
+        gather_actions: GatherActionsCache,
 
         pub const MulCache = struct {
             a_data: []const Scalar,
@@ -59,6 +61,12 @@ pub const Op = struct {
             a_shape: []const usize,
             b_shape: []const usize,
         };
+
+        pub const GatherActionsCache = struct {
+            actions: []const u8,
+            batch_size: usize,
+            num_actions: usize,
+        };
     };
 };
 
@@ -80,13 +88,13 @@ pub const TrackedTensor = struct {
 pub const AutodiffContext = struct {
     allocator: std.mem.Allocator,
     tape: std.ArrayList(Op),
-    grad_ctx: GradContext,
+    grad_ctx: *GradContext,
 
-    pub fn init(base_allocator: std.mem.Allocator) AutodiffContext {
+    pub fn init(base_allocator: std.mem.Allocator, grad_ctx: *GradContext) AutodiffContext {
         return AutodiffContext{
             .allocator = base_allocator,
             .tape = std.ArrayList(Op){},
-            .grad_ctx = GradContext.init(base_allocator),
+            .grad_ctx = grad_ctx,
         };
     }
 
@@ -96,16 +104,16 @@ pub const AutodiffContext = struct {
             self.allocator.free(op.operand_handles);
         }
         self.tape.deinit(self.allocator);
-        self.grad_ctx.deinit();
+        // Don't deinit grad_ctx - it's owned by caller
     }
 
-    /// Clear tape and gradients for next iteration
+    /// Clear tape for next iteration (don't reset gradients - caller manages that)
     pub fn reset(self: *AutodiffContext) void {
         for (self.tape.items) |op| {
             self.allocator.free(op.operand_handles);
         }
         self.tape.clearRetainingCapacity();
-        self.grad_ctx.reset();
+        // Don't reset grad_ctx - caller manages gradients
     }
 
     /// Create a tracked tensor from raw data
@@ -129,7 +137,7 @@ pub const AutodiffContext = struct {
         while (i > 0) {
             i -= 1;
             const op = &self.tape.items[i];
-            backwardOp(&self.grad_ctx, op);
+            backwardOp(self.grad_ctx, op);
         }
     }
 
@@ -286,6 +294,44 @@ pub const AutodiffContext = struct {
 
         return c;
     }
+
+    /// Tracked gather operation for action selection
+    /// Given q_all [batch_size, num_actions] and actions [batch_size],
+    /// returns q_sa [batch_size] where q_sa[i] = q_all[i, actions[i]]
+    pub fn trackedGatherActions(
+        self: *AutodiffContext,
+        q_all: TrackedTensor,
+        actions: []const u8,
+        batch_size: usize,
+        num_actions: usize,
+        q_sa_tensor: Tensor,
+    ) !TrackedTensor {
+        // Forward pass: gather Q-values for selected actions
+        for (0..batch_size) |i| {
+            const action = actions[i];
+            const offset = i * num_actions + action;
+            q_sa_tensor.data[i] = q_all.tensor.data[offset];
+        }
+
+        // Track gradient
+        const q_sa = try self.track(q_sa_tensor);
+
+        // Cache actions for backward pass
+        const allocator = std.heap.page_allocator;
+        const actions_copy = try allocator.dupe(u8, actions);
+
+        // Record operation
+        const operands = [_]GradHandle{q_all.grad_handle};
+        try self.recordOp(.gather_actions, q_sa.grad_handle, &operands, .{
+            .gather_actions = .{
+                .actions = actions_copy,
+                .batch_size = batch_size,
+                .num_actions = num_actions,
+            },
+        });
+
+        return q_sa;
+    }
 };
 
 /// Execute backward pass for a single operation
@@ -296,6 +342,7 @@ fn backwardOp(grad_ctx: *GradContext, op: *const Op) void {
         .matmul => backwardMatmul(grad_ctx, op),
         .relu => backwardRelu(grad_ctx, op),
         .broadcast_add => backwardBroadcastAdd(grad_ctx, op),
+        .gather_actions => backwardGatherActions(grad_ctx, op),
     }
 }
 
@@ -441,6 +488,35 @@ fn backwardBroadcastAdd(grad_ctx: *GradContext, op: *const Op) void {
     }
 }
 
+/// Backward pass for gather_actions: scatter gradients back to source tensor
+/// For q_sa[i] = q_all[i, actions[i]], we have:
+/// dq_all[i, actions[i]] += dq_sa[i]
+fn backwardGatherActions(grad_ctx: *GradContext, op: *const Op) void {
+    const dq_sa = grad_ctx.getGrad(op.result_handle);
+    const q_all_handle = op.operand_handles[0];
+
+    const cache = op.cache.gather_actions;
+    const actions = cache.actions;
+    const batch_size = cache.batch_size;
+    const num_actions = cache.num_actions;
+
+    // Allocate gradient buffer for q_all [batch_size, num_actions]
+    const allocator = std.heap.page_allocator;
+    const dq_all = allocator.alloc(Scalar, batch_size * num_actions) catch return;
+    defer allocator.free(dq_all);
+
+    @memset(dq_all, 0.0);
+
+    // Scatter gradients: dq_all[i, actions[i]] = dq_sa[i]
+    for (0..batch_size) |i| {
+        const action = actions[i];
+        const offset = i * num_actions + action;
+        dq_all[offset] = dq_sa[i];
+    }
+
+    grad_ctx.accumulate(q_all_handle, dq_all);
+}
+
 // ============ Helper matmul variants for backward pass ============
 
 /// Matrix multiply with B transposed: C = A @ B^T
@@ -484,7 +560,10 @@ fn matmulTransposeA(
 }
 
 test "autodiff add" {
-    var ad_ctx = AutodiffContext.init(std.testing.allocator);
+    var grad_ctx = GradContext.init(std.testing.allocator);
+    defer grad_ctx.deinit();
+
+    var ad_ctx = AutodiffContext.init(std.testing.allocator, &grad_ctx);
     defer ad_ctx.deinit();
 
     // Create input tensors

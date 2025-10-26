@@ -34,6 +34,7 @@ pub const huber = loss.huber;
 
 // Re-export optimizer functions
 pub const sgdStep = optimizer.sgdStep;
+pub const sgdStepClipped = optimizer.sgdStepClipped;
 
 test {
     std.testing.refAllDecls(@This());

@@ -89,12 +89,72 @@ pub fn build(b: *std.Build) void {
     // by passing `--prefix` or `-p`.
     b.installArtifact(exe);
 
+    // 2x2 Cube trainer executable
+    const exe_2x2 = b.addExecutable(.{
+        .name = "train_2x2",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main_2x2.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "machine_learning", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(exe_2x2);
+
+    // Gridworld trainer executable (DQN sanity check)
+    const exe_gridworld = b.addExecutable(.{
+        .name = "train_gridworld",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main_gridworld.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "machine_learning", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(exe_gridworld);
+
+    // Tabular Q-learning baseline executable
+    const exe_tabular = b.addExecutable(.{
+        .name = "train_tabular",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main_tabular.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "machine_learning", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(exe_tabular);
+
+    // 2x2 Cube evaluator (deterministic greedy eval) - DISABLED FOR NOW (compile errors)
+    // const exe_eval_2x2 = b.addExecutable(.{
+    //     .name = "eval_2x2",
+    //     .root_module = b.createModule(.{
+    //         .root_source_file = b.path("src/eval_2x2.zig"),
+    //         .target = target,
+    //         .optimize = optimize,
+    //         .imports = &.{
+    //             .{ .name = "machine_learning", .module = mod },
+    //         },
+    //     }),
+    // });
+    // b.installArtifact(exe_eval_2x2);
+
     // This creates a top level step. Top level steps have a name and can be
     // invoked by name when running `zig build` (e.g. `zig build run`).
     // This will evaluate the `run` step rather than the default step.
     // For a top level step to actually do something, it must depend on other
     // steps (e.g. a Run step, as we will see in a moment).
-    const run_step = b.step("run", "Run the app");
+    const run_step = b.step("run", "Run the 3x3 smoke test");
+    const run_2x2_step = b.step("train2x2", "Train 2x2 cube solver with curriculum learning");
+    const run_gridworld_step = b.step("gridworld", "Train DQN on simple 4x4 gridworld (sanity check)");
+    const run_tabular_step = b.step("tabular", "Train tabular Q-learning baseline on gridworld");
+    // const run_eval_2x2_step = b.step("eval2x2", "Evaluate 2x2 DQN with deterministic greedy eval");
 
     // This creates a RunArtifact step in the build graph. A RunArtifact step
     // invokes an executable compiled by Zig. Steps will only be executed by the
@@ -105,14 +165,34 @@ pub fn build(b: *std.Build) void {
     const run_cmd = b.addRunArtifact(exe);
     run_step.dependOn(&run_cmd.step);
 
+    const run_2x2_cmd = b.addRunArtifact(exe_2x2);
+    run_2x2_step.dependOn(&run_2x2_cmd.step);
+
+    const run_gridworld_cmd = b.addRunArtifact(exe_gridworld);
+    run_gridworld_step.dependOn(&run_gridworld_cmd.step);
+
+    const run_tabular_cmd = b.addRunArtifact(exe_tabular);
+    run_tabular_step.dependOn(&run_tabular_cmd.step);
+
+    // const run_eval_2x2_cmd = b.addRunArtifact(exe_eval_2x2);
+    // run_eval_2x2_step.dependOn(&run_eval_2x2_cmd.step);
+
     // By making the run step depend on the default step, it will be run from the
     // installation directory rather than directly from within the cache directory.
     run_cmd.step.dependOn(b.getInstallStep());
+    run_2x2_cmd.step.dependOn(b.getInstallStep());
+    run_gridworld_cmd.step.dependOn(b.getInstallStep());
+    run_tabular_cmd.step.dependOn(b.getInstallStep());
+    // run_eval_2x2_cmd.step.dependOn(b.getInstallStep());
 
     // This allows the user to pass arguments to the application in the build
     // command itself, like this: `zig build run -- arg1 arg2 etc`
     if (b.args) |args| {
         run_cmd.addArgs(args);
+        run_2x2_cmd.addArgs(args);
+        run_gridworld_cmd.addArgs(args);
+        run_tabular_cmd.addArgs(args);
+        // run_eval_2x2_cmd.addArgs(args);
     }
 
     // Creates an executable that will run `test` blocks from the provided module.
