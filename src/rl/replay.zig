@@ -5,10 +5,11 @@ pub fn Experience(comptime StateType: type) type {
     return struct {
         state: StateType,
         action: u8,
-        reward: f32,
-        next_state: StateType,
+        reward: f32, // Pre-computed n-step return
+        next_state: StateType, // State after n steps
         done: bool,
         episode_id: usize = 0, // For tracking buffer age diagnostics
+        n_steps_taken: u8 = 1, // Actual number of steps taken (1 to n_step)
     };
 }
 
@@ -60,6 +61,7 @@ pub fn ReplayBuffer(comptime StateType: type) type {
             rewards: []f32,
             next_states: []f32,
             dones: []bool,
+            n_steps_taken: []u8,
             state_dim: usize,
         ) !void {
             if (self.size < batch_size) {
@@ -82,6 +84,7 @@ pub fn ReplayBuffer(comptime StateType: type) type {
                 actions[i] = exp.action;
                 rewards[i] = exp.reward;
                 dones[i] = exp.done;
+                n_steps_taken[i] = exp.n_steps_taken;
             }
         }
 
@@ -146,9 +149,10 @@ test "replay buffer push and sample" {
     var rewards: [3]f32 = undefined;
     var next_states: [3 * 324]f32 = undefined;
     var dones: [3]bool = undefined;
+    var n_steps_taken: [3]u8 = undefined;
 
     var prng = std.Random.DefaultPrng.init(42);
-    try buffer.sample(3, prng.random(), &states, &actions, &rewards, &next_states, &dones, 324);
+    try buffer.sample(3, prng.random(), &states, &actions, &rewards, &next_states, &dones, &n_steps_taken, 324);
 
     // Verify we got data
     for (actions) |action| {
@@ -194,4 +198,54 @@ test "replay buffer ring behavior" {
     // Size should still be 3 (capacity)
     try std.testing.expectEqual(@as(usize, 3), buffer.len());
     try std.testing.expectEqual(@as(usize, 1), buffer.pos);
+}
+
+test "replay buffer preserves n_steps_taken metadata" {
+    const env_mod = @import("../env.zig");
+    const CubeState = env_mod.CubeState;
+
+    var buffer = try ReplayBuffer(CubeState).init(std.testing.allocator, 10);
+    defer buffer.deinit();
+
+    const state = CubeState.initSolved();
+    var next_state = state.clone();
+    next_state.step(.U);
+
+    // Add experiences with varying n_steps_taken values (1 to 5)
+    for (0..5) |i| {
+        buffer.push(.{
+            .state = state,
+            .action = @intCast(i),
+            .reward = @floatFromInt(i),
+            .next_state = next_state,
+            .done = false,
+            .n_steps_taken = @intCast(i + 1), // 1, 2, 3, 4, 5
+        });
+    }
+
+    try std.testing.expectEqual(@as(usize, 5), buffer.len());
+
+    // Sample and verify n_steps_taken metadata is preserved
+    var states: [5 * 324]f32 = undefined;
+    var actions: [5]u8 = undefined;
+    var rewards: [5]f32 = undefined;
+    var next_states: [5 * 324]f32 = undefined;
+    var dones: [5]bool = undefined;
+    var n_steps_taken: [5]u8 = undefined;
+
+    var prng = std.Random.DefaultPrng.init(42);
+    try buffer.sample(5, prng.random(), &states, &actions, &rewards, &next_states, &dones, &n_steps_taken, 324);
+
+    // Verify n_steps_taken values are in valid range [1, 5]
+    for (n_steps_taken) |n| {
+        try std.testing.expect(n >= 1 and n <= 5);
+    }
+
+    // Verify correspondence: if action is i, then n_steps_taken should be i+1
+    for (0..5) |i| {
+        const action = actions[i];
+        const n_steps = n_steps_taken[i];
+        const expected_n_steps = action + 1;
+        try std.testing.expectEqual(expected_n_steps, n_steps);
+    }
 }

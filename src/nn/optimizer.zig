@@ -25,8 +25,19 @@ pub fn sgdStepClipped(
 ) void {
     std.debug.assert(params.len == param_handles.len);
 
-    for (params, param_handles) |param, handle| {
+    for (params, param_handles, 0..) |param, handle, param_idx| {
         const grad = grad_ctx.getGrad(handle);
+
+        // DIAGNOSTIC: Check if lengths match before attempting update
+        if (param.data.len != grad.len) {
+            std.debug.print("\n[OPTIMIZER ERROR] Parameter/gradient length mismatch at index {d}:\n", .{param_idx});
+            std.debug.print("  Parameter data length: {d}\n", .{param.data.len});
+            std.debug.print("  Gradient handle: {d}\n", .{handle});
+            std.debug.print("  Gradient length: {d}\n", .{grad.len});
+            std.debug.print("  Ratio: param_len/grad_len = {d:.2}\n", .{@as(f32, @floatFromInt(param.data.len)) / @as(f32, @floatFromInt(grad.len))});
+            std.debug.print("  Likely the dueling value head (batch_size vs 1) or advantage head.\n", .{});
+            @panic("for loop over objects with non-equal lengths");
+        }
 
         // Update with optional gradient clipping: param -= lr * clip(grad)
         for (param.data, grad) |*p, g| {

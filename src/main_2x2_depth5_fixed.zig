@@ -155,8 +155,8 @@ pub fn main() !void {
         .{ .depth = 4, .max_episodes = 99999, .success_threshold = 0.0 }, // Cap at depth 4
     };
 
-    var current_depth: usize = 3;
-    var current_stage_idx: usize = 0;
+    var current_depth: usize = 5; // FIXED at depth 5
+    var current_stage_idx: usize = curriculum.len - 1; // Disable curriculum advancement
     var episodes_at_current_depth: usize = 0;
 
     // Rolling window for success rate
@@ -170,9 +170,9 @@ pub fn main() !void {
     // Statistics tracking
     var total_steps: usize = 0;
     var total_successes: usize = 0;
-    var depth_successes = try allocator.alloc(usize, 5);
+    var depth_successes = try allocator.alloc(usize, 6); // Support depths 0-5
     defer allocator.free(depth_successes);
-    var depth_episodes = try allocator.alloc(usize, 5);
+    var depth_episodes = try allocator.alloc(usize, 6); // Support depths 0-5
     defer allocator.free(depth_episodes);
     @memset(depth_successes, 0);
     @memset(depth_episodes, 0);

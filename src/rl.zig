@@ -9,6 +9,7 @@
 const std = @import("std");
 
 pub const replay = @import("rl/replay.zig");
+pub const prioritized_replay = @import("rl/prioritized_replay.zig");
 pub const qnetwork = @import("rl/qnetwork.zig");
 pub const dqn = @import("rl/dqn.zig");
 pub const episode = @import("rl/episode.zig");
@@ -16,6 +17,8 @@ pub const episode = @import("rl/episode.zig");
 // Re-export common types
 pub const ReplayBuffer = replay.ReplayBuffer;
 pub const Experience = replay.Experience;
+pub const PrioritizedReplayBuffer = prioritized_replay.PrioritizedReplayBuffer;
+pub const PrioritizedExperience = prioritized_replay.PrioritizedExperience;
 pub const QNetwork = qnetwork.QNetwork;
 pub const DQNAgent = dqn.DQNAgent;
 pub const DQNConfig = dqn.DQNConfig;

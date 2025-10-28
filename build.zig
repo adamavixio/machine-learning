@@ -16,6 +16,11 @@ pub fn build(b: *std.Build) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
+
+    // Performance optimization flags
+    const use_blas = b.option(bool, "use_blas", "Enable BLAS (Accelerate framework on macOS) for fast matmul") orelse true;
+    const use_tensor_pool = b.option(bool, "use_tensor_pool", "Enable tensor buffer pooling to reduce allocations") orelse false;
+
     // It's also possible to define more custom flags to toggle optional features
     // of this build script using `b.option()`. All defined flags (including
     // target and optimize options) will be listed when running `zig build --help`
@@ -28,6 +33,11 @@ pub fn build(b: *std.Build) void {
     // to our consumers. We must give it a name because a Zig package can expose
     // multiple modules and consumers will need to be able to specify which
     // module they want to access.
+    // Create build options that can be accessed in code
+    const build_options = b.addOptions();
+    build_options.addOption(bool, "use_blas", use_blas);
+    build_options.addOption(bool, "use_tensor_pool", use_tensor_pool);
+
     const mod = b.addModule("machine_learning", .{
         // The root source file is the "entry point" of this module. Users of
         // this module will only be able to access public declarations contained
@@ -39,7 +49,15 @@ pub fn build(b: *std.Build) void {
         // Later on we'll use this module as the root module of a test executable
         // which requires us to specify a target.
         .target = target,
+        .imports = &.{
+            .{ .name = "build_options", .module = build_options.createModule() },
+        },
     });
+
+    // Link Accelerate framework on macOS when BLAS is enabled
+    if (use_blas and target.result.os.tag == .macos) {
+        mod.linkFramework("Accelerate", .{});
+    }
 
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function
@@ -103,6 +121,48 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe_2x2);
 
+    // 2x2 Cube trainer with Prioritized Experience Replay (PER)
+    const exe_2x2_per = b.addExecutable(.{
+        .name = "train_2x2_per",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main_2x2_per.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "machine_learning", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(exe_2x2_per);
+
+    // 2x2 Cube trainer with FIXED depth-4 (no curriculum)
+    const exe_2x2_depth4 = b.addExecutable(.{
+        .name = "train_2x2_depth4_fixed",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main_2x2_depth4_fixed.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "machine_learning", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(exe_2x2_depth4);
+
+    // 2x2 Cube trainer with FIXED depth-5 (no curriculum)
+    const exe_2x2_depth5 = b.addExecutable(.{
+        .name = "train_2x2_depth5_fixed",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main_2x2_depth5_fixed.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "machine_learning", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(exe_2x2_depth5);
+
     // Gridworld trainer executable (DQN sanity check)
     const exe_gridworld = b.addExecutable(.{
         .name = "train_gridworld",
@@ -152,6 +212,7 @@ pub fn build(b: *std.Build) void {
     // steps (e.g. a Run step, as we will see in a moment).
     const run_step = b.step("run", "Run the 3x3 smoke test");
     const run_2x2_step = b.step("train2x2", "Train 2x2 cube solver with curriculum learning");
+    const run_2x2_per_step = b.step("train2x2_per", "Train 2x2 cube solver with Prioritized Experience Replay");
     const run_gridworld_step = b.step("gridworld", "Train DQN on simple 4x4 gridworld (sanity check)");
     const run_tabular_step = b.step("tabular", "Train tabular Q-learning baseline on gridworld");
     // const run_eval_2x2_step = b.step("eval2x2", "Evaluate 2x2 DQN with deterministic greedy eval");
@@ -168,6 +229,9 @@ pub fn build(b: *std.Build) void {
     const run_2x2_cmd = b.addRunArtifact(exe_2x2);
     run_2x2_step.dependOn(&run_2x2_cmd.step);
 
+    const run_2x2_per_cmd = b.addRunArtifact(exe_2x2_per);
+    run_2x2_per_step.dependOn(&run_2x2_per_cmd.step);
+
     const run_gridworld_cmd = b.addRunArtifact(exe_gridworld);
     run_gridworld_step.dependOn(&run_gridworld_cmd.step);
 
@@ -181,6 +245,7 @@ pub fn build(b: *std.Build) void {
     // installation directory rather than directly from within the cache directory.
     run_cmd.step.dependOn(b.getInstallStep());
     run_2x2_cmd.step.dependOn(b.getInstallStep());
+    run_2x2_per_cmd.step.dependOn(b.getInstallStep());
     run_gridworld_cmd.step.dependOn(b.getInstallStep());
     run_tabular_cmd.step.dependOn(b.getInstallStep());
     // run_eval_2x2_cmd.step.dependOn(b.getInstallStep());
@@ -190,6 +255,7 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| {
         run_cmd.addArgs(args);
         run_2x2_cmd.addArgs(args);
+        run_2x2_per_cmd.addArgs(args);
         run_gridworld_cmd.addArgs(args);
         run_tabular_cmd.addArgs(args);
         // run_eval_2x2_cmd.addArgs(args);

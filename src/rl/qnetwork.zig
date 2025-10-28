@@ -23,20 +23,34 @@ pub const QNetwork = struct {
         grad_ctx: *GradContext,
         rng: std.Random,
     ) !QNetwork {
-        const online_model = try Model.init(
+        return initWithDueling(allocator, layer_sizes, tensor_ctx, grad_ctx, rng, false);
+    }
+
+    /// Initialize Q-networks with optional dueling architecture
+    pub fn initWithDueling(
+        allocator: std.mem.Allocator,
+        layer_sizes: []const usize,
+        tensor_ctx: *TensorContext,
+        grad_ctx: *GradContext,
+        rng: std.Random,
+        use_dueling: bool,
+    ) !QNetwork {
+        const online_model = try Model.initWithDueling(
             allocator,
             layer_sizes,
             tensor_ctx,
             grad_ctx,
             rng,
+            use_dueling,
         );
 
-        const target_model = try Model.init(
+        const target_model = try Model.initWithDueling(
             allocator,
             layer_sizes,
             tensor_ctx,
             grad_ctx,
             rng,
+            use_dueling,
         );
 
         return QNetwork{
@@ -81,6 +95,7 @@ pub const QNetwork = struct {
     pub fn updateTargetPolyak(self: *QNetwork, tau: f32) void {
         const one_minus_tau = 1.0 - tau;
 
+        // Update backbone layers
         for (self.online_model.layers, 0..) |*online_layer, i| {
             const target_layer = &self.target_model.layers[i];
 
@@ -92,6 +107,33 @@ pub const QNetwork = struct {
             // Update b
             for (online_layer.b.data, 0..) |online_val, j| {
                 target_layer.b.data[j] = tau * online_val + one_minus_tau * target_layer.b.data[j];
+            }
+        }
+
+        // Update dueling heads if present
+        if (self.online_model.use_dueling) {
+            if (self.online_model.value_head) |*online_vh| {
+                const target_vh = &self.target_model.value_head.?;
+                // Update value head W
+                for (online_vh.W.data, 0..) |online_val, j| {
+                    target_vh.W.data[j] = tau * online_val + one_minus_tau * target_vh.W.data[j];
+                }
+                // Update value head b
+                for (online_vh.b.data, 0..) |online_val, j| {
+                    target_vh.b.data[j] = tau * online_val + one_minus_tau * target_vh.b.data[j];
+                }
+            }
+
+            if (self.online_model.advantage_head) |*online_ah| {
+                const target_ah = &self.target_model.advantage_head.?;
+                // Update advantage head W
+                for (online_ah.W.data, 0..) |online_val, j| {
+                    target_ah.W.data[j] = tau * online_val + one_minus_tau * target_ah.W.data[j];
+                }
+                // Update advantage head b
+                for (online_ah.b.data, 0..) |online_val, j| {
+                    target_ah.b.data[j] = tau * online_val + one_minus_tau * target_ah.b.data[j];
+                }
             }
         }
     }

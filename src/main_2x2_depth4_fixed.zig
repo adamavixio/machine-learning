@@ -155,8 +155,8 @@ pub fn main() !void {
         .{ .depth = 4, .max_episodes = 99999, .success_threshold = 0.0 }, // Cap at depth 4
     };
 
-    var current_depth: usize = 3;
-    var current_stage_idx: usize = 0;
+    var current_depth: usize = 4; // FIXED at depth 4
+    var current_stage_idx: usize = curriculum.len - 1; // Disable curriculum advancement
     var episodes_at_current_depth: usize = 0;
 
     // Rolling window for success rate

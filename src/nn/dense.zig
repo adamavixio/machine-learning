@@ -22,8 +22,25 @@ pub const DenseLayer = struct {
     in_dim: usize,
     out_dim: usize,
 
+    /// Scratch buffer for backward pass gradient computation
+    /// Pre-allocated to avoid allocator overhead during training
+    /// Size: [max_batch_size x in_dim] for dA (gradient w.r.t. input)
+    scratch_dA: []Scalar,
+
+    /// Scratch buffer for backward pass gradient computation
+    /// Pre-allocated to avoid allocator overhead during training
+    /// Size: [in_dim x out_dim] for dB (gradient w.r.t. weights)
+    scratch_dB: []Scalar,
+
+    /// Allocator used for scratch buffers (needed for cleanup)
+    allocator: std.mem.Allocator,
+
+    /// Maximum batch size for scratch buffer allocation
+    const MAX_BATCH_SIZE: usize = 64;
+
     /// Initialize a dense layer with He initialization
     pub fn init(
+        allocator: std.mem.Allocator,
         tensor_ctx: *TensorContext,
         grad_ctx: *GradContext,
         in_dim: usize,
@@ -55,6 +72,12 @@ pub const DenseLayer = struct {
         const W_handle = try grad_ctx.allocGrad(W.shape);
         const b_handle = try grad_ctx.allocGrad(b.shape);
 
+        // Allocate scratch buffers for backward pass
+        // dA: [max_batch_size x in_dim] for gradient w.r.t. input
+        const scratch_dA = try allocator.alloc(Scalar, MAX_BATCH_SIZE * in_dim);
+        // dB: [in_dim x out_dim] for gradient w.r.t. weights
+        const scratch_dB = try allocator.alloc(Scalar, in_dim * out_dim);
+
         return DenseLayer{
             .W = W,
             .W_handle = W_handle,
@@ -62,7 +85,16 @@ pub const DenseLayer = struct {
             .b_handle = b_handle,
             .in_dim = in_dim,
             .out_dim = out_dim,
+            .scratch_dA = scratch_dA,
+            .scratch_dB = scratch_dB,
+            .allocator = allocator,
         };
+    }
+
+    /// Clean up scratch buffers
+    pub fn deinit(self: *DenseLayer) void {
+        self.allocator.free(self.scratch_dA);
+        self.allocator.free(self.scratch_dB);
     }
 
     /// Forward pass: y = x @ W + b
@@ -94,6 +126,13 @@ pub const DenseLayer = struct {
 
         // Compute matmul: xW = x @ W
         const xW_tensor = try tensor_ctx.allocTensor(&[_]usize{ batch_size, self.out_dim });
+
+        // Slice scratch buffers to the correct size for this batch
+        // scratch_dA: [batch_size x in_dim] for gradient w.r.t. input (x)
+        const scratch_dA_slice = self.scratch_dA[0 .. batch_size * self.in_dim];
+        // scratch_dB: [in_dim x out_dim] for gradient w.r.t. weights (W)
+        const scratch_dB_slice = self.scratch_dB[0 .. self.in_dim * self.out_dim];
+
         const xW = try ad_ctx.trackedMatmul(
             x,
             W_tracked,
@@ -101,6 +140,8 @@ pub const DenseLayer = struct {
             self.in_dim,
             self.out_dim,
             xW_tensor,
+            scratch_dA_slice,
+            scratch_dB_slice,
         );
 
         // Add bias: y = xW + b (broadcast b across batch)
@@ -121,7 +162,8 @@ test "dense layer init" {
     var prng = std.Random.DefaultPrng.init(42);
     const rng = prng.random();
 
-    const layer = try DenseLayer.init(&tensor_ctx, &grad_ctx, 10, 5, rng);
+    var layer = try DenseLayer.init(std.testing.allocator, &tensor_ctx, &grad_ctx, 10, 5, rng);
+    defer layer.deinit();
 
     try std.testing.expectEqual(@as(usize, 10), layer.in_dim);
     try std.testing.expectEqual(@as(usize, 5), layer.out_dim);

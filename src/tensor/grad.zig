@@ -83,6 +83,15 @@ pub const GradContext = struct {
         @memcpy(grad[0..n], value[0..n]);
     }
 
+    /// Get total bytes in all gradient tensors (for diagnostics)
+    pub fn getTotalBytes(self: *GradContext) usize {
+        var total_bytes: usize = 0;
+        for (self.grads.items) |grad| {
+            total_bytes += grad.len * @sizeOf(Scalar);
+        }
+        return total_bytes;
+    }
+
     /// Reset all gradients to zero
     pub fn zeroGrads(self: *GradContext) void {
         for (self.grads.items) |grad| {

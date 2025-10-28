@@ -1,5 +1,6 @@
 const std = @import("std");
 const config = @import("config.zig");
+const blas = @import("blas.zig");
 
 const Scalar = config.TensorConfig.Scalar;
 const Vec = config.Vec;
@@ -127,7 +128,26 @@ pub fn matmul(
     K: usize,
     N: usize,
 ) !void {
-    // Use blocked version for larger matrices
+    // One-time diagnostic to verify BLAS path
+    const DebugOnce = struct {
+        var printed = false;
+    };
+    if (!DebugOnce.printed) {
+        if (comptime blas.isAvailable()) {
+            std.debug.print("[MATMUL] Using Apple Accelerate BLAS (compiled with -Duse_blas=true)\n", .{});
+        } else {
+            std.debug.print("[MATMUL] BLAS not available, using hand-rolled SIMD fallback\n", .{});
+        }
+        DebugOnce.printed = true;
+    }
+
+    // Compile-time dispatch to BLAS if available (2-10x speedup on matmul)
+    if (comptime blas.isAvailable()) {
+        blas.matmul_blas(C, A, B, M, K, N);
+        return;
+    }
+
+    // Otherwise use blocked version for larger matrices
     if (M >= 64 and N >= 64 and K >= 64) {
         return matmulBlocked(C, A, B, M, K, N);
     } else {
@@ -199,4 +219,86 @@ test "matmul identity" {
     for (A, 0..) |expected, i| {
         try std.testing.expectApproxEqAbs(expected, C[i], 1e-5);
     }
+}
+
+/// Naive implementation of C = A @ B^T (B is transposed)
+/// A: [M x N], B: [K x N], C: [M x K]
+fn matmulTransposeBNaive(
+    C: []Scalar,
+    A: []const Scalar,
+    B: []const Scalar,
+    M: usize,
+    N: usize,
+    K: usize,
+) !void {
+    @memset(C, 0.0);
+    for (0..M) |i| {
+        for (0..K) |k| {
+            for (0..N) |n| {
+                // A[i,n] * B[k,n] (B is transposed)
+                C[i * K + k] += A[i * N + n] * B[k * N + n];
+            }
+        }
+    }
+}
+
+/// Naive implementation of C = A^T @ B (A is transposed)
+/// A: [M x K], B: [M x N], C: [K x N]
+fn matmulTransposeANaive(
+    C: []Scalar,
+    A: []const Scalar,
+    B: []const Scalar,
+    M: usize,
+    K: usize,
+    N: usize,
+) !void {
+    @memset(C, 0.0);
+    for (0..K) |k| {
+        for (0..N) |n| {
+            for (0..M) |m| {
+                // A[m,k] transposed = A^T[k,m], B[m,n]
+                C[k * N + n] += A[m * K + k] * B[m * N + n];
+            }
+        }
+    }
+}
+
+/// Public API: Matrix multiply with B transposed: C = A @ B^T
+/// A: [M x N], B: [K x N], C: [M x K]
+pub fn matmulTransposeB(
+    C: []Scalar,
+    A: []const Scalar,
+    B: []const Scalar,
+    M: usize,
+    N: usize,
+    K: usize,
+) !void {
+    // Compile-time dispatch to BLAS if available
+    if (comptime blas.isAvailable()) {
+        blas.matmulTransposeB_blas(C, A, B, M, N, K);
+        return;
+    }
+
+    // Fallback to naive implementation
+    return matmulTransposeBNaive(C, A, B, M, N, K);
+}
+
+/// Public API: Matrix multiply with A transposed: C = A^T @ B
+/// A: [M x K], B: [M x N], C: [K x N]
+pub fn matmulTransposeA(
+    C: []Scalar,
+    A: []const Scalar,
+    B: []const Scalar,
+    M: usize,
+    K: usize,
+    N: usize,
+) !void {
+    // Compile-time dispatch to BLAS if available
+    if (comptime blas.isAvailable()) {
+        blas.matmulTransposeA_blas(C, A, B, M, K, N);
+        return;
+    }
+
+    // Fallback to naive implementation
+    return matmulTransposeANaive(C, A, B, M, K, N);
 }

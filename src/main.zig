@@ -8,7 +8,7 @@ const CubeState = ml.env.CubeState;
 const Move = ml.env.Move;
 const DQNConfig = ml.rl.DQNConfig;
 
-const DQNAgent = ml.rl.DQNAgent(CubeState);
+const DQNAgent = ml.rl.DQNAgent(CubeState, false); // Use uniform replay
 const Experience = ml.rl.Experience(CubeState);
 
 pub fn main() !void {
@@ -22,10 +22,13 @@ pub fn main() !void {
     var tensor_ctx = TensorContext.init(allocator);
     defer tensor_ctx.deinit();
 
-    var grad_ctx = GradContext.init(allocator);
-    defer grad_ctx.deinit();
+    var param_grad_ctx = GradContext.init(allocator);
+    defer param_grad_ctx.deinit();
 
-    var ad_ctx = AutodiffContext.init(allocator, &grad_ctx);
+    var temp_grad_ctx = GradContext.init(allocator);
+    defer temp_grad_ctx.deinit();
+
+    var ad_ctx = AutodiffContext.init(allocator, &param_grad_ctx, &temp_grad_ctx);
     defer ad_ctx.deinit();
 
     // Initialize RNG
@@ -63,7 +66,6 @@ pub fn main() !void {
         allocator,
         &layer_sizes,
         &tensor_ctx,
-        &grad_ctx,
         config,
         rng,
     );
@@ -94,7 +96,7 @@ pub fn main() !void {
             state.toOneHot(&state_onehot);
 
             // Select action
-            const action = try agent.selectAction(&state_onehot, &tensor_ctx, &ad_ctx, rng);
+            const action = try agent.selectAction(&state_onehot, &tensor_ctx, rng);
 
             // Execute action
             var next_state = state;
@@ -117,7 +119,7 @@ pub fn main() !void {
 
             // Train if enough samples
             if (agent.replay_buffer.canSample(config.batch_size)) {
-                const diag = try agent.trainStep(&tensor_ctx, &grad_ctx, &ad_ctx, rng);
+                const diag = try agent.trainStep(&tensor_ctx, rng);
                 episode_loss += diag.loss;
                 loss_count += 1;
             }
