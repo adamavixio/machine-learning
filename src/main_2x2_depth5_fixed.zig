@@ -1,5 +1,5 @@
 const std = @import("std");
-const ml = @import("machine_learning");
+const ml = @import("zinc");
 
 const TensorContext = ml.tensor.TensorContext;
 const GradContext = ml.tensor.GradContext;

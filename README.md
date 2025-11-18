@@ -162,7 +162,7 @@ src/
 ### Custom Environment Example
 
 ```zig
-const ml = @import("machine_learning");
+const zinc = @import("zinc");
 
 // Implement your own environment
 pub const MyEnvironment = struct {
@@ -172,7 +172,7 @@ pub const MyEnvironment = struct {
 };
 
 // Train a DQN agent
-var agent = try ml.rl.DQNAgent.init(allocator, config);
+var agent = try zinc.rl.DQNAgent.init(allocator, config);
 defer agent.deinit();
 
 for (0..num_episodes) |episode| {

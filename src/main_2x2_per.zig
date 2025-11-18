@@ -4,7 +4,7 @@
 // Use main_2x2.zig for production training
 
 const std = @import("std");
-const ml = @import("machine_learning");
+const ml = @import("zinc");
 
 const TensorContext = ml.tensor.TensorContext;
 const GradContext = ml.tensor.GradContext;
