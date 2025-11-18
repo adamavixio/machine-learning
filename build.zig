@@ -191,6 +191,20 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe_tabular);
 
+    // BFS solver for 2x2 cube (generates optimal policy table)
+    const exe_solver = b.addExecutable(.{
+        .name = "solver",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main_solver.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "machine_learning", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(exe_solver);
+
     // 2x2 Cube evaluator (deterministic greedy eval) - DISABLED FOR NOW (compile errors)
     // const exe_eval_2x2 = b.addExecutable(.{
     //     .name = "eval_2x2",
@@ -215,6 +229,7 @@ pub fn build(b: *std.Build) void {
     const run_2x2_per_step = b.step("train2x2_per", "Train 2x2 cube solver with Prioritized Experience Replay");
     const run_gridworld_step = b.step("gridworld", "Train DQN on simple 4x4 gridworld (sanity check)");
     const run_tabular_step = b.step("tabular", "Train tabular Q-learning baseline on gridworld");
+    const run_solver_step = b.step("solver", "Run BFS solver for 2x2 cube");
     // const run_eval_2x2_step = b.step("eval2x2", "Evaluate 2x2 DQN with deterministic greedy eval");
 
     // This creates a RunArtifact step in the build graph. A RunArtifact step
@@ -237,6 +252,10 @@ pub fn build(b: *std.Build) void {
 
     const run_tabular_cmd = b.addRunArtifact(exe_tabular);
     run_tabular_step.dependOn(&run_tabular_cmd.step);
+
+    const run_solver_cmd = b.addRunArtifact(exe_solver);
+    run_solver_cmd.addArg("generate");
+    run_solver_step.dependOn(&run_solver_cmd.step);
 
     // const run_eval_2x2_cmd = b.addRunArtifact(exe_eval_2x2);
     // run_eval_2x2_step.dependOn(&run_eval_2x2_cmd.step);

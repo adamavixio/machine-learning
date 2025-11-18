@@ -7,6 +7,7 @@ pub const tensor = @import("tensor.zig");
 pub const nn = @import("nn.zig");
 pub const env = @import("env.zig");
 pub const rl = @import("rl.zig");
+pub const solver = @import("solver.zig");
 
 test {
     std.testing.refAllDecls(@This());
